@@ -24,6 +24,7 @@ async def create_test(
     employer_id: uuid.UUID,
     title: str,
     duration_minutes: int,
+    questions_data: list[dict[str, Any]],
     pass_score: Optional[int] = None,
 ) -> Test:
     """
@@ -34,6 +35,7 @@ async def create_test(
         employer_id (uuid.UUID): Employer User ID.
         title (str): Test title.
         duration_minutes (int): Allowed test time in minutes.
+        questions_data (list[dict]): Initial questions to add to the test.
         pass_score (Optional[int]): Minimum passing score, or None if optional.
 
     Returns:
@@ -46,9 +48,28 @@ async def create_test(
         pass_score=pass_score,
         duration_minutes=duration_minutes,
     )
+
+    db.add(test)
+    await db.flush()
+
+    new_questions = []
+    for q in questions_data:
+        question = Question(
+            test_id=test.id,
+            type=q["type"],
+            content=q["content"],
+            options=q.get("options"),
+            test_cases=q.get("test_cases"),
+            correct_answer=q["correct_answer"],
+            points=q["points"],
+        )
+        new_questions.append(question)
+    test.questions = new_questions
+
     db.add(test)
     await db.flush()
     await db.refresh(test)
+    
     logger.info(f"Test created successfully: ID {test.id}, Title: '{test.title}' by Employer {employer_id}")
     return test
 
@@ -142,7 +163,7 @@ async def assign_test_to_candidate(
     test_id: int,
     employer_id: uuid.UUID,
     candidate_email: str,
-    expires_in_hours: int = 48,
+    expires_in_hours: float = 48,
 ) -> tuple[TestAssignment, str]:
     """
     Assign a test to a candidate email.

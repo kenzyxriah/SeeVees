@@ -20,15 +20,6 @@ from services.email_service import send_mock_email
 from core.config import BASE_URL
 
 
-class CreateTestRequest(BaseModel):
-    title: str = Field(..., min_length=3, max_length=255)
-    duration_minutes: int = Field(..., ge=1, le=300)
-    pass_score: int | None = Field(None, ge=0)
-
-    class Config:
-        extra = "forbid"
-
-
 class QuestionPayload(BaseModel):
     type: Literal["MCQ", "CODING"]
     content: str = Field(..., min_length=10)
@@ -36,6 +27,16 @@ class QuestionPayload(BaseModel):
     points: int = Field(..., ge=1)
     options: dict | None = None
     test_cases: dict | None = None
+
+    class Config:
+        extra = "forbid"
+
+
+class CreateTestRequest(BaseModel):
+    title: str = Field(..., min_length=3, max_length=255)
+    duration_minutes: int = Field(..., ge=1, le=300)
+    pass_score: int | None = Field(None, ge=0)
+    questions: list[QuestionPayload] = Field(..., min_length=1)
 
     class Config:
         extra = "forbid"
@@ -50,7 +51,7 @@ class UpdateQuestionsRequest(BaseModel):
 class AssignTestRequest(BaseModel):
     test_id: int
     candidate_email: str
-    expires_in_hours: int = Field(48, ge=1, le=168)
+    expires_in_hours: float = Field(48, gt=0, le=168)
 
     @field_validator("candidate_email")
     @classmethod
@@ -82,6 +83,7 @@ async def create_candidate_test(
             title=request.title,
             duration_minutes=request.duration_minutes,
             pass_score=request.pass_score,
+            questions_data=[q.model_dump() for q in request.questions]
         )
         return generate_response(
             entity={
@@ -136,7 +138,8 @@ async def assign_test(
                 "test_id": assignment.test_id,
                 "candidate_email": assignment.candidate_email,
                 "expires_at": assignment.expires_at.isoformat() if assignment.expires_at else None,
-                "status": assignment.status
+                "status": assignment.status,
+                "token": assignment.unique_token
             },
             message="Test assigned successfully"
         )
