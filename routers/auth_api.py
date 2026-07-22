@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, status, HTTPException
+from fastapi import APIRouter, Depends, status, HTTPException, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel, Field
@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 from common.api_response import generate_response, generate_error_response
 from common.logger import logger
 from core.database import get_db
+from core.limiter import limiter
 from models.user import RoleEnum
 from services.auth_service import register_user, authenticate_user
 
@@ -33,18 +34,19 @@ class LoginRequest(BaseModel):
 
 
 @router.post("/register")
-async def register(request: RegisterRequest, db: AsyncSession = Depends(get_db)):
+@limiter.limit("5/minute")
+async def register(request: Request, payload: RegisterRequest, db: AsyncSession = Depends(get_db)):
     """
     Register a new user and automatically log them in, returning an access token.
     """
     try:
         token_data = await register_user(
             db=db,
-            email=request.email,
-            password=request.password,
-            first_name=request.first_name,
-            last_name=request.last_name,
-            role=request.role
+            email=payload.email,
+            password=payload.password,
+            first_name=payload.first_name,
+            last_name=payload.last_name,
+            role=payload.role
         )
         return generate_response(
             succeeded=True,

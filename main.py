@@ -7,13 +7,14 @@ from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.openapi.utils import get_openapi
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
-from slowapi import _rate_limit_exceeded_handler
-from slowapi.errors import RateLimitExceeded
 
 from core.config import ENVIRONMENT
 from core.lifespan import lifespan
 from core.middleware import monitor_traffic
 from core.exceptions import global_exception_handler
+from core.limiter import limiter
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 from routers import routers
 
 
@@ -36,6 +37,7 @@ app.add_middleware(
 
 app.middleware("http")(monitor_traffic)
 app.add_exception_handler(Exception, global_exception_handler)
+app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 
