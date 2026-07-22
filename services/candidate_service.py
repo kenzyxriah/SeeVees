@@ -10,6 +10,7 @@ from common.logger import logger
 from models.assignment import TestAssignment, AssignmentStatusEnum
 from models.submission import Submission
 from models.telemetry import Telemetry
+from models.test import Test
 from services.grading_service import grade_submission
 from common import shared
 
@@ -136,7 +137,7 @@ async def get_assigned_test_by_token(db: AsyncSession, token: str) -> dict[str, 
     stmt = (
         select(TestAssignment)
         .where(TestAssignment.unique_token == token)
-        .options(selectinload(TestAssignment.test).selectinload(TestAssignment.test.questions))
+        .options(selectinload(TestAssignment.test).selectinload(Test.questions))
     )
     result = await db.execute(stmt)
     assignment = result.scalar_one_or_none()
@@ -178,7 +179,8 @@ async def get_assigned_test_by_token(db: AsyncSession, token: str) -> dict[str, 
     except Exception:
         logger.exception(f"Failed to manage Redis timer session for token {token}")
 
-    draft_answers = (await check_telemetry(db, token)).answers or {}
+    telemetry_record = await check_telemetry(db, token)
+    draft_answers = telemetry_record.answers if telemetry_record and telemetry_record.answers else {}
 
     safe_questions = []
     for q in test.questions:
@@ -242,7 +244,7 @@ async def submit_test_answers(
     db: AsyncSession,
     token: str,
     answers: dict[str, Any],
-) -> Submission:
+) -> tuple[Submission, str]:
     """
     Grade and record test submission. Updates assignment status and bans telemetry token.
 
@@ -262,7 +264,7 @@ async def submit_test_answers(
         stmt = (
             select(TestAssignment)
             .where(TestAssignment.unique_token == token)
-            .options(selectinload(TestAssignment.test).selectinload(TestAssignment.test.questions))
+            .options(selectinload(TestAssignment.test).selectinload(Test.questions))
             .with_for_update()
         )
         result = await db.execute(stmt)
@@ -310,7 +312,7 @@ async def submit_test_answers(
         f"Test submitted successfully. Candidate: {assignment.candidate_email}, Score: {total_score}, Passed: {is_passed}"
     )
 
-    return submission
+    return submission, assignment.test.title
 
 
 async def get_candidate_submission_result(
