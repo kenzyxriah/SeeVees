@@ -1,0 +1,74 @@
+services:
+  fastapi:
+    container_name: fastapi_container
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["./entrypoint.sh"]
+    ports:
+      - "8080:8080"
+    volumes:
+      - api_data:/app/data
+
+    restart: unless-stopped
+    env_file:
+      - ./.env 
+    networks:
+      - shared_network
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    container_name: postgres_container
+    image: postgres:16-alpine
+    restart: unless-stopped
+    shm_size: 256mb
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-seevees}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - shared_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-postgres} -d $${POSTGRES_DB:-seevees}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  redis:
+    container_name: redis_container
+    image: redis:alpine
+    ports:
+      - "6380:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    networks:
+      - shared_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 2s
+      retries: 3
+
+
+volumes:
+  api_data:
+  redis_data:
+  postgres_data:
+
+
+networks:
+  shared_network:
+    external: false
+    name: shared_network
+

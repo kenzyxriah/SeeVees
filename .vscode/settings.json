@@ -1,0 +1,7 @@
+{
+    "ty.diagnosticMode": "off",
+    "postman.settings.dotenv-detection-notification-visibility": false,
+    "editor.inlineSuggest.enabled": false,
+    "gemini.enableGhostText": false,
+    "antigravity.enableInlineSuggestions": false
+}
