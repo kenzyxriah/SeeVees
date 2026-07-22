@@ -134,7 +134,7 @@ async def submit_assessment(
     On success, sends candidate a result link email in the background.
     """
     try:
-        submission = await submit_test_answers(
+        submission, test_title = await submit_test_answers(
             db=db,
             token=request.token,
             answers=request.answers,
@@ -143,7 +143,7 @@ async def submit_assessment(
         background_tasks.add_task(
             send_submission_result_email,
             candidate_email=submission.candidate_email,
-            test_title=submission.assignment.test.title,
+            test_title=test_title,
             submission_id=str(submission.id),
         )
 
