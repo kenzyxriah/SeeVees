@@ -4,4 +4,3 @@ from models.test import Test
 from models.question import Question, QuestionTypeEnum
 from models.assignment import TestAssignment, AssignmentStatusEnum
 from models.submission import Submission
-from models.telemetry import Telemetry

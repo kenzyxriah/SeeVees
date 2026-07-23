@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Any, Optional
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,52 +9,9 @@ import uuid, json
 from common.logger import logger
 from models.assignment import TestAssignment, AssignmentStatusEnum
 from models.submission import Submission
-from models.telemetry import Telemetry
 from models.test import Test
 from services.grading_service import grade_submission
 from common import shared
-
-
-async def check_telemetry(db: AsyncSession, token: str) -> Optional[Telemetry]:
-    """
-    Check if a telemetry record exists for a token and verify its ban status.
-
-    Args:
-        db (AsyncSession): Active database session.
-        token (str): Unique candidate assignment access token.
-
-    Returns:
-        Optional[Telemetry]: Telemetry model instance if it exists and is not banned.
-
-    Raises:
-        HTTPException 400: If the token has been banned (e.g. after submission).
-    """
-    telemetry_stmt = select(Telemetry).where(Telemetry.token == token)
-    telemetry_res = await db.execute(telemetry_stmt)
-    telemetry_record = telemetry_res.scalar_one_or_none()
-    if telemetry_record and telemetry_record.is_banned:
-        raise HTTPException(status_code=400, detail="This token has been banned from assessment system.")
-    return telemetry_record
-
-
-async def ban_telemetry_token(db: AsyncSession, token: str, candidate_email: str) -> None:
-    """
-    Lock the telemetry record, clear current draft progress, and set ban status to True.
-    This effectively prevents further draft saving and quiz re-entries.
-
-    Args:
-        db (AsyncSession): Active database session.
-        token (str): Unique candidate assignment access token.
-        candidate_email (str): The candidate's email address.
-    """
-    telemetry_stmt = select(Telemetry).where(Telemetry.token == token).with_for_update()
-    telemetry_res = await db.execute(telemetry_stmt)
-    telemetry_record = telemetry_res.scalar_one_or_none()
-
-    if telemetry_record and not telemetry_record.is_banned:
-        telemetry_record.answers = None
-        telemetry_record.is_banned = True
-
 
 
 async def get_assessment_instructions(db: AsyncSession, token: str) -> dict[str, Any]:
@@ -134,110 +91,117 @@ async def get_assigned_test_by_token(db: AsyncSession, token: str) -> dict[str, 
         HTTPException 404: If token is invalid.
         HTTPException 400: If token is banned, expired, or already submitted.
     """
-    stmt = (
-        select(TestAssignment)
-        .where(TestAssignment.unique_token == token)
-        .options(selectinload(TestAssignment.test).selectinload(Test.questions))
-    )
-    result = await db.execute(stmt)
-    assignment = result.scalar_one_or_none()
+    async with db.begin():
+        stmt = (
+            select(TestAssignment)
+            .where(TestAssignment.unique_token == token)
+            .options(selectinload(TestAssignment.test).selectinload(Test.questions))
+            .with_for_update()
+        )
+        result = await db.execute(stmt)
+        assignment = result.scalar_one_or_none()
 
-    if not assignment:
-        raise HTTPException(status_code=404, detail="Invalid assessment token")
+        if not assignment:
+            raise HTTPException(status_code=404, detail="Invalid assessment token")
 
-    if assignment.expires_at < datetime.now(timezone.utc):
-        assignment.status = AssignmentStatusEnum.EXPIRED
-        await db.flush()
-        raise HTTPException(status_code=400, detail="Assessment link has expired")
+        if assignment.expires_at < datetime.now(timezone.utc):
+            assignment.status = AssignmentStatusEnum.EXPIRED
+            await db.flush()
+            raise HTTPException(status_code=400, detail="Assessment link has expired")
 
-    if assignment.status == AssignmentStatusEnum.SUBMITTED:
-        raise HTTPException(status_code=400, detail="This assessment has already been submitted")
+        if assignment.status == AssignmentStatusEnum.SUBMITTED:
+            raise HTTPException(status_code=400, detail="This assessment has already been submitted")
 
-    if assignment.status == AssignmentStatusEnum.PENDING:
-        assignment.status = AssignmentStatusEnum.STARTED
-        await db.flush()
+        if assignment.status == AssignmentStatusEnum.PENDING:
+            assignment.status = AssignmentStatusEnum.STARTED
+            await db.flush()
 
-    test = assignment.test
-    duration_secs = test.duration_minutes * 60
-    redis_key = f"active_session:{token}"
-    remaining_seconds = duration_secs
+        test = assignment.test
+        duration_secs = test.duration_minutes * 60
+        redis_key = f"active_session:{token}"
+        remaining_seconds = duration_secs
 
-    try:
-        cached_session = await shared.redis_client.get(redis_key)
-        if cached_session:
-            session_data = json.loads(cached_session)
-            start_time = datetime.fromisoformat(session_data["start_time"])
-            elapsed = (datetime.now(timezone.utc) - start_time).total_seconds()
-            remaining_seconds = max(0, int(duration_secs - elapsed))
-        else:
-            session_payload = {
-                "start_time": datetime.now(timezone.utc).isoformat(),
-                "candidate_email": assignment.candidate_email
-            }
-            ttl = duration_secs + 30
-            await shared.redis_client.set(redis_key, json.dumps(session_payload), ex=int(ttl))
-    except Exception:
-        logger.exception(f"Failed to manage Redis timer session for token {token}")
+        try:
+            cached_session = await shared.redis_client.get(redis_key)
+            if cached_session:
+                session_data = json.loads(cached_session)
+                start_time = datetime.fromisoformat(session_data["start_time"])
+                elapsed = (datetime.now(timezone.utc) - start_time).total_seconds()
+                remaining_seconds = max(0, int(duration_secs - elapsed))
+            else:
+                session_payload = {
+                    "start_time": datetime.now(timezone.utc).isoformat(),
+                    "duration_minutes": test.duration_minutes,
+                    "candidate_email": assignment.candidate_email
+                }
+                ttl = duration_secs + 60
+                await shared.redis_client.set(redis_key, json.dumps(session_payload), ex=int(ttl))
+        except Exception as e:
+            logger.exception(f"Failed to manage Redis timer session for token {token}")
+            raise HTTPException(status_code=500, detail="failed to initialize test session")
 
-    telemetry_record = await check_telemetry(db, token)
-    draft_answers = telemetry_record.answers if telemetry_record and telemetry_record.answers else {}
+        draft_key = f"draft:{token}"
+        cached_draft = await shared.redis_client.get(draft_key)
+        draft_answers = json.loads(cached_draft) if cached_draft else {}
 
-    safe_questions = []
-    for q in test.questions:
-        safe_questions.append({
-            "id": str(q.id),
-            "type": q.type,
-            "content": q.content,
-            "options": q.options,
-            "test_cases": q.test_cases,
-            "points": q.points,
-        })
+        safe_questions = []
+        for q in test.questions:
+            safe_questions.append({
+                "id": str(q.id),
+                "type": q.type,
+                "content": q.content,
+                "options": q.options,
+                "test_cases": q.test_cases,
+                "points": q.points,
+            })
 
-    return {
-        "token": token,
-        "assignment_id": str(assignment.id),
-        "test_id": test.id,
-        "title": test.title,
-        "duration_minutes": test.duration_minutes,
-        "remaining_seconds": remaining_seconds,
-        "draft_answers": draft_answers,
-        "questions": safe_questions,
-        "expires_at": assignment.expires_at,
-    }
+        return {
+            "token": token,
+            "assignment_id": str(assignment.id),
+            "test_id": test.id,
+            "title": test.title,
+            "duration_minutes": test.duration_minutes,
+            "remaining_seconds": remaining_seconds,
+            "draft_answers": draft_answers,
+            "questions": safe_questions,
+            "expires_at": assignment.expires_at,
+        }
 
 
 async def save_assessment_draft(
-    db: AsyncSession,
     token: str,
     answers: dict[str, Any],
 ) -> None:
     """
-    Save candidate's active quiz progress to the Telemetry database table.
-    Bypasses overall assignment validation to accept fast progress saving.
+    Save candidate's active quiz progress.
 
     Args:
-        db (AsyncSession): Active database session.
         token (str): Unique candidate assignment access token.
         answers (dict[str, Any]): Dictionary containing current draft answers.
     """
-    telemetry_record = await check_telemetry(db, token)
+    redis_key = f"active_session:{token}"
+    cached_session = await shared.redis_client.get(redis_key)
+    if not cached_session:
+        raise HTTPException(status_code=400, detail="Active test session not found or expired")
 
-    if not telemetry_record:
-        stmt = select(TestAssignment).where(TestAssignment.unique_token == token)
-        result = await db.execute(stmt)
-        assignment = result.scalar_one_or_none()
-        email = assignment.candidate_email 
+    session_data = json.loads(cached_session)
+    start_time = datetime.fromisoformat(session_data["start_time"])
+    duration_minutes = session_data["duration_minutes"]
 
-        telemetry_record = Telemetry(
-            token=token,
-            candidate_email=email,
-            is_banned=False
-        )
-        db.add(telemetry_record)
-    else:
-        telemetry_record.answers = answers
+    current_time = datetime.now(timezone.utc)
+    duration_seconds = duration_minutes * 60
+    if start_time.tzinfo is None:
+        start_time = start_time.replace(tzinfo=timezone.utc)
 
-    await db.flush()
+    end_time = start_time + timedelta(seconds=duration_seconds)
+    remaining_seconds = (end_time - current_time).total_seconds()
+    ttl = int(remaining_seconds + 60)
+
+    if ttl <= 0:
+        raise HTTPException(status_code=400, detail="Assessment time has expired")
+
+    draft_key = f"draft:{token}"
+    await shared.redis_client.set(draft_key, json.dumps(answers), ex=ttl)
 
 
 async def submit_test_answers(
@@ -300,7 +264,8 @@ async def submit_test_answers(
             submission_breakdown=breakdown,
         )
 
-        await ban_telemetry_token(db, token, assignment.candidate_email)
+        draft_key = f"draft:{token}"
+        await shared.redis_client.delete(draft_key)
 
         db.add(submission)
         await db.flush()

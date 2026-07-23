@@ -1,11 +1,13 @@
 import uuid
-from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException
+from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel, Field
 
 from common.api_response import generate_response, generate_error_response
 from common.logger import logger
 from core.database import get_db
+from core.auth import get_current_user, User
+from core.limiter import limiter
 from services.candidate_service import (
     get_assessment_instructions,
     get_assigned_test_by_token,
@@ -97,15 +99,17 @@ async def take_assessment(
 
 
 @router.post("/save-draft")
+@limiter.limit("1/10 seconds")
 async def save_draft(
-    request: SaveDraftRequest,
-    db: AsyncSession = Depends(get_db)
+    request: Request,
+    payload: SaveDraftRequest,
+    current_user: User = Depends(get_current_user),
 ):
     """
     Save progress draft for questions.
     """
     try:
-        await save_assessment_draft(db=db, token=request.token, answers=request.answers)
+        await save_assessment_draft(token=payload.token, answers=payload.answers)
         return generate_response(entity=None, message="Draft saved successfully")
     except HTTPException as e:
         logger.exception(f"Failed to save draft for {request.token}")
