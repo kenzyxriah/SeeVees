@@ -155,7 +155,7 @@ Authorization: Bearer <token>
 ```
 
 ## Candidate assessment routes
-*Note: No authentication headers are required for candidate routes. The assignment token acts as the access credential.*
+*Note: No authentication headers are required for candidate routes (the assignment token acts as the access credential), with the exception of the `/save-draft` endpoint which requires a valid Bearer token.*
 
 ### Get instructions
 Loads test metadata (test title, duration, deadline, candidate email) using the unique token. Allows the client to show instructions before starting the test timer.
@@ -190,10 +190,13 @@ Example body:
 ```
 
 ### Save progress draft
-Saves the candidate's intermediate answers to the database telemetry table. Protects against browser crashes or network drops.
+Saves the candidate's intermediate answers to the Redis cache. Protects against browser crashes or network drops.
+
+This endpoint requires user authentication and is rate-limited to a maximum of 1 request per 10 seconds.
 
 ```http
 POST /api/v1/assessment/save-draft
+x-api-key: <api-key>
 Content-Type: application/json
 ```
 

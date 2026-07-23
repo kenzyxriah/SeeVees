@@ -73,10 +73,6 @@ The app will be available at:
 - http://localhost:8080/
 - http://localhost:8080/docs
 
-The Swagger docs are protected with basic auth:
-
-- username: `user`
-- password: `pass`
 
 ## Database setup
 
@@ -91,7 +87,6 @@ The project uses PostgreSQL and Redis.
 ### Redis
 
 - container name: `redis_container`
-- used for short-lived assignment and cache-related flows
 
 ### Notes
 
@@ -143,17 +138,6 @@ The core models live under the models folder and are fairly simple. The schema i
 | submission_breakdown |
 | submitted_at     |
 +------------------+
-
-+------------------+
-| Telemetry        |
-|------------------|
-| token            |
-| candidate_email  |
-| answers          |
-| is_banned        |
-| created_at       |
-| updated_at       |
-+------------------+
 ```
 
 In plain terms:
@@ -163,7 +147,6 @@ In plain terms:
 - one Test can have many TestAssignments
 - one TestAssignment can have one Submission
 - candidates are represented by their email address in assignments and submissions, not as separate User records
-- Telemetry stores lightweight tracking data for candidate sessions and ban state
 
 ## API documentation
 
