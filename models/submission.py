@@ -4,7 +4,7 @@ class Submission(Base):
     __tablename__ = "submissions"
 
     id: uuid.UUID = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    assignment_id: Optional[uuid.UUID] = Column(UUID(as_uuid=True), ForeignKey("test_assignments.id"), unique=True, nullable=True)
+    assignment_id: Optional[uuid.UUID] = Column(UUID(as_uuid=True), ForeignKey("test_assignments.id", ondelete="SET NULL"), unique=True, nullable=True)
     candidate_email: str = Column(String(255), nullable=False)
     score: int = Column(Integer, nullable=False)
     is_passed: bool = Column(Boolean, nullable=False, default=False)

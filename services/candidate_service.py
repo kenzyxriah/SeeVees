@@ -265,7 +265,9 @@ async def submit_test_answers(
         )
 
         draft_key = f"draft:{token}"
+        active_session_key = f"active_session:{token}"
         await shared.redis_client.delete(draft_key)
+        await shared.redis_client.delete(active_session_key)
 
         db.add(submission)
         await db.flush()

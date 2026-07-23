@@ -52,7 +52,6 @@ async def create_test(
     db.add(test)
     await db.flush()
 
-    new_questions = []
     for q in questions_data:
         question = Question(
             test_id=test.id,
@@ -63,16 +62,12 @@ async def create_test(
             correct_answer=q["correct_answer"],
             points=q["points"],
         )
-        new_questions.append(question)
-    test.questions = new_questions
+        db.add(question)
 
-    db.add(test)
     await db.flush()
     await db.refresh(test)
-    
     logger.info(f"Test created successfully: ID {test.id}, Title: '{test.title}' by Employer {employer_id}")
     return test
-
 
 
 async def delete_test(db: AsyncSession, test_id: int, employer_id: uuid.UUID) -> bool:
@@ -101,9 +96,6 @@ async def delete_test(db: AsyncSession, test_id: int, employer_id: uuid.UUID) ->
         assignments = result.scalars().all()
 
         for assignment in assignments:
-            if assignment.submission is not None:
-                assignment.submission.assignment_id = None
-
             if shared.redis_client:
                 try:
                     await shared.redis_client.delete(f"active_assignment:{test.id}:{assignment.candidate_email}")
@@ -200,7 +192,7 @@ async def assign_test_to_candidate(
     await db.flush()
     await db.refresh(assignment)
 
-    ttl = expires_in_hours * 3600
+    ttl = max(1, int(expires_in_hours * 3600))
     await shared.redis_client.setex(redis_key, ttl, token)
 
     logger.info(f"Candidate {candidate_email} has been assigned the technical test: {test.title}")

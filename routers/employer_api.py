@@ -321,7 +321,7 @@ async def update_employer_test_questions(
 
 
 @router.delete("/tests/{test_id}")
-async def delete_test(
+async def delete_employer_test(
     test_id: int,
     current_user: User = Depends(require_role(["EMPLOYER"])),
     db: AsyncSession = Depends(get_db)
