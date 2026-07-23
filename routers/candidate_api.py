@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 from common.api_response import generate_response, generate_error_response
 from common.logger import logger
 from core.database import get_db
-from core.auth import get_current_user, User
+from core.auth import verify_api_key
 from core.limiter import limiter
 from services.candidate_service import (
     get_assessment_instructions,
@@ -103,7 +103,7 @@ async def take_assessment(
 async def save_draft(
     request: Request,
     payload: SaveDraftRequest,
-    current_user: User = Depends(get_current_user),
+    api_key: str = Depends(verify_api_key),
 ):
     """
     Save progress draft for questions.
@@ -112,7 +112,7 @@ async def save_draft(
         await save_assessment_draft(token=payload.token, answers=payload.answers)
         return generate_response(entity=None, message="Draft saved successfully")
     except HTTPException as e:
-        logger.exception(f"Failed to save draft for {request.token}")
+        logger.exception(f"Failed to save draft for {payload.token}")
         return generate_error_response(
             exception_error=e.detail,
             status_code=e.status_code,

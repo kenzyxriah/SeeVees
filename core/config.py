@@ -5,6 +5,7 @@ REDIS_HOST: str = config("REDIS_HOST")
 REDIS_PORT: str = config("REDIS_PORT")
 SECRET_KEY: str = config("SECRET_KEY")
 BASE_URL: str = config("BASE_URL", default="http://seevees.api")
+X_API_KEY: str = config("X_API_KEY")
 
 
 POSTGRES_USER: str = config("POSTGRES_USER")

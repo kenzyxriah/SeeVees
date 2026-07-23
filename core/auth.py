@@ -1,11 +1,11 @@
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Literal, get_args
 from pydantic import BaseModel
-from fastapi import HTTPException, Depends
+from fastapi import HTTPException, Depends, Header
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import jwt, uuid
 
-from core.config import SECRET_KEY
+from core.config import SECRET_KEY, X_API_KEY
 from common import shared
 from common.logger import logger
 
@@ -118,6 +118,15 @@ def require_role(allowed_roles: list[Role]):
         return current_user
 
     return dependency
+
+
+def verify_api_key(x_api_key: str = Header(...)):
+    """
+    Authenticate the provided API key.
+    """
+    if x_api_key != X_API_KEY:
+        raise HTTPException(status_code=403, detail="Invalid API key")
+    return x_api_key
 
 
 
